@@ -1,5 +1,6 @@
 #include "file_dialog.hpp"
 #include "objx.hpp"
+#include "metaUser.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_opengles2.h>
@@ -116,6 +117,10 @@ int main() {
     SDL_Window* window = SDL_CreateWindow("Pilonix Viewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_OPENGL);
     SDL_GLContext context = SDL_GL_CreateContext(window);
 
+    MetaUser& metaUser = MetaUser::instance();
+    // metaUser.startRecording("scenario.rec");
+    // metaUser.replay("scenario.rec");
+
     GLuint program = createProgram();
     glUseProgram(program);
     GLint texLoc = glGetUniformLocation(program, "tex");
@@ -155,6 +160,7 @@ int main() {
     while (running) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            metaUser.handleEvent(event);
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN) {
                 bool ctrl = (event.key.keysym.mod & KMOD_CTRL);
@@ -221,6 +227,9 @@ int main() {
 
         SDL_GL_SwapWindow(window);
     }
+
+    metaUser.stopRecording();
+    metaUser.stopReplay();
 
     SDL_GL_DeleteContext(context);
     SDL_DestroyWindow(window);

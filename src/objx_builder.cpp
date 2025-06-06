@@ -69,9 +69,11 @@ void decoupage() {
                     case SDLK_UP: offsetY -= 10; break;
                     case SDLK_DOWN: offsetY += 10; break;
                     case SDLK_RETURN: {
+                        cout << "[Decoupage] On va enregistrer le .objx";
                         px.save();
+                        cout << "[Decoupage] .objx enregistré!!";
                         running = false;
-                        cout << "[Objx créé] " << px.toString();
+                        cout << "[Decoupage] " << px.toString();
                         break;
                     }
                 }

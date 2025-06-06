@@ -151,7 +151,10 @@ bool Objx::save() {
     }
 
     // 📦 Création du zip
-    string zipPath = emplacement + ".Objx";
+    string zipPath;
+    if (zipPath.size() < 5 || zipPath.substr(-5) != ".objx") {
+        zipPath = emplacement + ".objx";
+    }
     int err = 0;
     zip_t* archive = zip_open(zipPath.c_str(), ZIP_CREATE | ZIP_TRUNCATE, &err);
     if (!archive) return false;

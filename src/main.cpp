@@ -52,6 +52,42 @@ const char* fragmentShaderSrc = R"(
     }
 )";
 
+struct Vec3 {
+    float x, y, z;
+};
+
+void rayon3D(float sx, float sy, int screenW, int screenH,
+                         float angleX, float angleY, float offsetX, float offsetY, float scale,
+                         Vec3& p0, Vec3& p1) {
+    // Étape 1 : coordonnées écran → Normalized Device Coordinates
+    float ndcX = 2.0f * sx / screenW - 1.0f;
+    float ndcY = -(2.0f * sy / screenH - 1.0f); // inversé car y descend en écran
+
+    // Étape 2 : corriger offset et scale (revenir dans le repère caméra après projection)
+    float x_proj = (ndcX - offsetX) / scale;
+    float y_proj = (ndcY - offsetY) / scale;
+
+    // Étape 3 : choisir deux profondeurs (avant projection perspective)
+    float z0 = 0.0f;
+    float z1 = 1.0f;
+
+    // Étape 4 : inverse rotation Y, puis X, pour les deux points
+    auto inverser = [&](float x, float y, float z) -> Vec3 {
+        float sinY = sin(-angleY), cosY = cos(-angleY);
+        float zx = z * cosY - x * sinY;
+        float xx = z * sinY + x * cosY;
+
+        float sinX = sin(-angleX), cosX = cos(-angleX);
+        float yy = y * cosX + zx * sinX;
+        float zz = -y * sinX + zx * cosX;
+
+        return {xx, yy, zz};
+    };
+
+    p0 = inverser(x_proj, y_proj, z0);
+    p1 = inverser(x_proj, y_proj, z1);
+}
+
 GLuint compileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);

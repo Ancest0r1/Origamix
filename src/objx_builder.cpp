@@ -1,6 +1,7 @@
 // Objx_builder.cpp
 #include "objx.hpp"
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_image.h>
 #include <zip.h>
 #include <fstream>
@@ -18,11 +19,19 @@ Objx px;
 vector<bool> selectedTriangles;
 
 void decoupage() {
+    cout.setf(ios::unitbuf);
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         cerr << "Erreur SDL_Init : " << SDL_GetError() << endl;
         return;
     }
     IMG_Init(IMG_INIT_PNG);
+
+    TTF_Init();
+    TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14);
+    if (!font) {
+        cerr << "Erreur chargement police : " << TTF_GetError() << endl;
+        return;
+    }
 
     SDL_Window* win = SDL_CreateWindow("Découpage", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -41,7 +50,8 @@ void decoupage() {
     int offsetX = 0, offsetY = 0;
     bool running = true;
     const float selectionRadius = 10.0f;
-
+    string affichageTexte;
+    
     while (running) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
@@ -67,8 +77,12 @@ void decoupage() {
                     case SDLK_LEFT: offsetX -= 10; break;
                     case SDLK_RIGHT: offsetX += 10; break;
                     case SDLK_UP: offsetY -= 10; break;
-                    case SDLK_DOWN: offsetY += 10; break;
+                    case SDLK_DOWN: 
+                        offsetY += 10; 
+                        cout << "[Decoupage] arrow down";
+                        break;
                     case SDLK_RETURN: {
+                        px.getSurfaces()[0].points = points;
                         cout << "[Decoupage] On va enregistrer le .objx";
                         px.save();
                         cout << "[Decoupage] .objx enregistré!!";
@@ -89,6 +103,8 @@ void decoupage() {
                     points.push_back({(float)x, (float)y, 0.0f, u, v});
                 }
                 if (points.size() % 3 == 0) selectedTriangles.push_back(false);
+                affichageTexte = px.toString();
+                cout << "objx.toString = " << affichageTexte << endl ;
             }
             if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_RIGHT) {
                 for (size_t i = 0; i + 2 < points.size(); i += 3) {
@@ -142,9 +158,33 @@ void decoupage() {
             SDL_RenderDrawLine(renderer, points[i+2].x + offsetX, points[i+2].y + offsetY, points[i].x + offsetX, points[i].y + offsetY);
         }
 
+        if (1 == 2 && !affichageTexte.empty()) {
+            SDL_Rect fond = {10, 10, 580, 200};
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 220);
+            SDL_RenderFillRect(renderer, &fond);
+            
+            SDL_Color noir = {0, 0, 0};
+            istringstream ss(affichageTexte);
+            string line;
+            int y = 10;
+            while (getline(ss, line)) {
+                if (line.empty()) continue;
+                SDL_Surface* surf = TTF_RenderText_Blended(font, line.c_str(), noir);
+                SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+                SDL_Rect dst = {15, y, surf->w, surf->h};
+                SDL_RenderCopy(renderer, tex, NULL, &dst);
+                SDL_FreeSurface(surf);
+                SDL_DestroyTexture(tex);
+                y += 18;
+                if (y > 200) break;
+            }
+        }
+
         SDL_RenderPresent(renderer);
     }
 
+    TTF_CloseFont(font);
+    TTF_Quit();
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(win);

@@ -1,3 +1,5 @@
+// main.cpp
+#include "alglin.hpp"
 #include "file_dialog.hpp"
 #include "objx.hpp"
 #include <SDL2/SDL.h>
@@ -7,7 +9,6 @@
 #include <iostream>
 #include <vector>
 #include <map>
-#include <string>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -20,24 +21,14 @@ const char* vertexShaderSrc = R"(
     attribute vec2 aTexCoord;
     varying vec2 vTexCoord;
     attribute vec4 vPosition;
-    uniform float angleX;
-    uniform float angleY;
+    uniform mat3 rotationMatrix;
     uniform float offsetX;
     uniform float offsetY;
     uniform float scale;
     void main() {
-        float cosX = cos(angleX);
-        float sinX = sin(angleX);
-        float cosY = cos(angleY);
-        float sinY = sin(angleY);
-        vec4 pos = vPosition;
-
-        float y = pos.y * cosX - pos.z * sinX;
-        float z = pos.y * sinX + pos.z * cosX;
-        float x = pos.x * cosY + z * sinY;
-        z = -pos.x * sinY + z * cosY;
-
-        gl_Position = vec4(x*scale + offsetX, y*scale + offsetY, z*scale, z + 2.0);
+        vec3 rotated = rotationMatrix * vPosition.xyz;
+        gl_PointSize = 10.0;
+        gl_Position = vec4(rotated.x * scale + offsetX, rotated.y * scale + offsetY, rotated.z * scale, rotated.z + 2.0);
         vTexCoord = aTexCoord;
     }
 )";
@@ -51,42 +42,6 @@ const char* fragmentShaderSrc = R"(
         gl_FragColor = texture2D(tex, vTexCoord);
     }
 )";
-
-struct Vec3 {
-    float x, y, z;
-};
-
-void rayon3D(float sx, float sy, int screenW, int screenH,
-                         float angleX, float angleY, float offsetX, float offsetY, float scale,
-                         Vec3& p0, Vec3& p1) {
-    // Étape 1 : coordonnées écran → Normalized Device Coordinates
-    float ndcX = 2.0f * sx / screenW - 1.0f;
-    float ndcY = -(2.0f * sy / screenH - 1.0f); // inversé car y descend en écran
-
-    // Étape 2 : corriger offset et scale (revenir dans le repère caméra après projection)
-    float x_proj = (ndcX - offsetX) / scale;
-    float y_proj = (ndcY - offsetY) / scale;
-
-    // Étape 3 : choisir deux profondeurs (avant projection perspective)
-    float z0 = 0.0f;
-    float z1 = 1.0f;
-
-    // Étape 4 : inverse rotation Y, puis X, pour les deux points
-    auto inverser = [&](float x, float y, float z) -> Vec3 {
-        float sinY = sin(-angleY), cosY = cos(-angleY);
-        float zx = z * cosY - x * sinY;
-        float xx = z * sinY + x * cosY;
-
-        float sinX = sin(-angleX), cosX = cos(-angleX);
-        float yy = y * cosX + zx * sinX;
-        float zz = -y * sinX + zx * cosX;
-
-        return {xx, yy, zz};
-    };
-
-    p0 = inverser(x_proj, y_proj, z0);
-    p1 = inverser(x_proj, y_proj, z1);
-}
 
 GLuint compileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
@@ -121,7 +76,6 @@ GLuint createProgram() {
 }
 
 GLuint loadTexture(const string& filename) {
-    cout << "[loadTexture] Chargement de " << filename << endl;
     SDL_Surface* surface = IMG_Load(filename.c_str());
     if (!surface) {
         cerr << "Erreur chargement texture : " << IMG_GetError() << endl;
@@ -139,8 +93,6 @@ GLuint loadTexture(const string& filename) {
     GLenum format = surface->format->BytesPerPixel == 4 ? GL_RGBA : GL_RGB;
     glTexImage2D(GL_TEXTURE_2D, 0, format, surface->w, surface->h, 0, format, GL_UNSIGNED_BYTE, surface->pixels);
     SDL_FreeSurface(surface);
-
-    cout << "[loadTexture] réussi! " << endl;
     return texID;
 }
 
@@ -156,11 +108,10 @@ int main() {
     glUseProgram(program);
     GLint texLoc = glGetUniformLocation(program, "tex");
     glUniform1i(texLoc, 0);
-    GLint angleXLoc = glGetUniformLocation(program, "angleX");
-    GLint angleYLoc = glGetUniformLocation(program, "angleY");
     GLint scaleLoc  = glGetUniformLocation(program, "scale");
     GLint offsetXLoc = glGetUniformLocation(program, "offsetX");
     GLint offsetYLoc = glGetUniformLocation(program, "offsetY");
+    GLint rotLoc = glGetUniformLocation(program, "rotationMatrix");
 
     float angleX = 0, angleY = 0, scale = 1.0f;
     float offsetX = 0, offsetY = 0;
@@ -202,58 +153,68 @@ int main() {
                     case SDLK_PLUS:
                     case SDLK_EQUALS: scale *= 1.1f; break;
                     case SDLK_MINUS:  scale /= 1.1f; break;
-
-                    case SDLK_n: {
-                        string path = ouvrirBoiteFichier(false);
-                        if (!path.empty()) {
-                            Objx p = Objx::buildFromPNG(path);
-                            SDL_GL_MakeCurrent(window, context);
-                            for (const auto& s : p.getSurfaces()) {
-                                string tex = fs::path(s.texture).filename().string();
-                                if (textureIDs.count(tex) == 0) {
-                                    textureIDs[tex] = loadTexture(s.texture);
-                                }
-                            }
-                            Objxs.push_back(p);
-                        }
-                        break;
-                    }
                 }
             }
         }
 
+        Mat3 rotation = Mat3::rotXY(angleX, angleY);
+
         glClearColor(1, 1, 1, 1);
         glClear(GL_COLOR_BUFFER_BIT);
-
-        glUniform1f(angleXLoc, angleX);
-        glUniform1f(angleYLoc, angleY);
         glUniform1f(scaleLoc, scale);
         glUniform1f(offsetXLoc, offsetX);
         glUniform1f(offsetYLoc, offsetY);
+        glUniformMatrix3fv(rotLoc, 1, GL_FALSE, rotation.data());
+
+        // calcul des repères écran et position curseur
+        Vec3 unitX = rotation * Vec3(1, 0, 0);
+        Vec3 unitY = rotation * Vec3(0, 1, 0);
+        Vec3 unitZ = rotation * Vec3(0, 0, 1);
+
+        int mouseX, mouseY;
+        SDL_GetMouseState(&mouseX, &mouseY);
+        float screenX = ((mouseX - WIDTH / 2.0f) / (WIDTH / 2.0f) - offsetX) / scale;
+        float screenY = -((mouseY - HEIGHT / 2.0f) / (HEIGHT / 2.0f)  - offsetY) / scale;
+        Vec3 base = unitX * screenX + unitY * screenY;
 
         for (auto& p : Objxs) {
             for (auto& s : p.getSurfaces()) {
                 string tex = fs::path(s.texture).filename().string();
                 glBindTexture(GL_TEXTURE_2D, textureIDs[tex]);
-
                 const auto& pts = s.points;
                 for (size_t i = 0; i + 2 < pts.size(); i += 3) {
-                    float tri[15] = {
-                        pts[i].x, pts[i].y, pts[i].z, pts[i].u, pts[i].v,
-                        pts[i+1].x, pts[i+1].y, pts[i+1].z, pts[i+1].u, pts[i+1].v,
-                        pts[i+2].x, pts[i+2].y, pts[i+2].z, pts[i+2].u, pts[i+2].v
-                    };
-
+                    float tri[15];
+                    for (int j = 0; j < 3; ++j) {
+                        tri[j*5+0] = pts[i+j].x;
+                        tri[j*5+1] = pts[i+j].y;
+                        tri[j*5+2] = pts[i+j].z;
+                        tri[j*5+3] = pts[i+j].u;
+                        tri[j*5+4] = pts[i+j].v;
+                    }
                     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri);
                     glEnableVertexAttribArray(0);
                     GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
                     glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
                     glEnableVertexAttribArray(texCoordLoc);
-
                     glDrawArrays(GL_TRIANGLES, 0, 3);
                 }
             }
         }
+        
+                // ligne entre z=0 et z=5
+        Vec3 p0 = base;
+        Vec3 p1 = base + unitZ * 5.0f;
+        float line[10] = {
+            p0.x, p0.y, p0.z, 0.5f, 0.5f,
+            p1.x, p1.y, p1.z, 0.5f, 0.5f
+        };
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), line);
+        glEnableVertexAttribArray(0);
+        GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
+        glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), line + 3);
+        glEnableVertexAttribArray(texCoordLoc);
+        glLineWidth(4.0f);
+        glDrawArrays(GL_LINES, 0, 2);
 
         SDL_GL_SwapWindow(window);
     }

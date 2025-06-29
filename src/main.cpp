@@ -177,12 +177,25 @@ int main() {
         float screenY = -((mouseY - HEIGHT / 2.0f) / (HEIGHT / 2.0f)  - offsetY) / scale;
         Vec3 base = unitX * screenX + unitY * screenY;
 
+        Vec3 rayOrigin = base;
+        Vec3 rayDir = unitZ; // vers l'avant de la scène
+        Vec3 nearestHit;
+        float nearestT = 1e9f;
+        bool hasHit = false;
+
         for (auto& p : Objxs) {
             for (auto& s : p.getSurfaces()) {
                 string tex = fs::path(s.texture).filename().string();
                 glBindTexture(GL_TEXTURE_2D, textureIDs[tex]);
                 const auto& pts = s.points;
                 for (size_t i = 0; i + 2 < pts.size(); i += 3) {
+                    Vec3 v0(pts[i].x, pts[i].y, pts[i].z);
+                    Vec3 v1(pts[i+1].x, pts[i+1].y, pts[i+1].z);
+                    Vec3 v2(pts[i+2].x, pts[i+2].y, pts[i+2].z);
+                    float tHit; Vec3 hp;
+                    if (intersectRayTriangle(rayOrigin, rayDir, v0, v1, v2, tHit, hp)) {
+                        if (tHit < nearestT) { nearestT = tHit; nearestHit = hp; hasHit = true; }
+                    }
                     float tri[15];
                     for (int j = 0; j < 3; ++j) {
                         tri[j*5+0] = pts[i+j].x;
@@ -194,13 +207,24 @@ int main() {
                     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri);
                     glEnableVertexAttribArray(0);
                     GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
-                    glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
-                    glEnableVertexAttribArray(texCoordLoc);
-                    glDrawArrays(GL_TRIANGLES, 0, 3);
-                }
+                glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
+                glEnableVertexAttribArray(texCoordLoc);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
             }
         }
-        
+        }
+
+        if (hasHit) {
+            float pt[5] = {nearestHit.x, nearestHit.y, nearestHit.z, 0.5f, 0.5f};
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), pt);
+            glEnableVertexAttribArray(0);
+            GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
+            glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), pt + 3);
+            glEnableVertexAttribArray(texCoordLoc);
+            glPointSize(8.0f);
+            glDrawArrays(GL_POINTS, 0, 1);
+        }
+
                 // ligne entre z=0 et z=5
         Vec3 p0 = base;
         Vec3 p1 = base + unitZ * 5.0f;

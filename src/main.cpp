@@ -5,6 +5,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_opengles2.h>
+#include <SDL2/SDL_ttf.h>
 #include <filesystem>
 #include <iostream>
 #include <vector>
@@ -96,9 +97,83 @@ GLuint loadTexture(const string& filename) {
     return texID;
 }
 
+bool rayIntersectsTriangle(const Vec3& orig, const Vec3& dir,
+                           const Vec3& v0, const Vec3& v1, const Vec3& v2,
+                           float& tOut) {
+    const float EPS = 1e-6f;
+    Vec3 e1 = v1 - v0;
+    Vec3 e2 = v2 - v0;
+    Vec3 h = cross(dir, e2);
+    float a = dot(e1, h);
+    if (fabs(a) < EPS) return false;
+    float f = 1.0f / a;
+    Vec3 s = orig - v0;
+    float u = f * dot(s, h);
+    if (u < 0.0f || u > 1.0f) return false;
+    Vec3 q = cross(s, e1);
+    float v = f * dot(dir, q);
+    if (v < 0.0f || u + v > 1.0f) return false;
+    float t = f * dot(e2, q);
+    if (t < EPS) return false;
+    tOut = t;
+    return true;
+}
+
+void createTextTexture(TTF_Font* font, const string& text, GLuint& tex,
+                       int& w, int& h) {
+    SDL_Color black = {0, 0, 0};
+    SDL_Surface* surf = TTF_RenderUTF8_Blended(font, text.c_str(), black);
+    if (!surf) {
+        w = h = 0;
+        return;
+    }
+    if (tex == 0) glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    GLenum fmt = surf->format->BytesPerPixel == 4 ? GL_RGBA : GL_RGB;
+    glTexImage2D(GL_TEXTURE_2D, 0, fmt, surf->w, surf->h, 0,
+                 fmt, GL_UNSIGNED_BYTE, surf->pixels);
+    w = surf->w;
+    h = surf->h;
+    SDL_FreeSurface(surf);
+}
+
+void drawText(GLuint program, GLuint tex, int texW, int texH, int x, int y) {
+    if (tex == 0 || texW == 0 || texH == 0) return;
+
+    float x1 = 4.0f * x / WIDTH - 2.0f;
+    float y1 = -4.0f * y / HEIGHT + 2.0f;
+    float x2 = 4.0f * (x + texW) / WIDTH - 2.0f;
+    float y2 = -4.0f * (y + texH) / HEIGHT + 2.0f;
+
+    float quad[30] = {
+        x1, y1, 0.0f, 0.0f, 0.0f,
+        x2, y1, 0.0f, 1.0f, 0.0f,
+        x2, y2, 0.0f, 1.0f, 1.0f,
+        x1, y1, 0.0f, 0.0f, 0.0f,
+        x2, y2, 0.0f, 1.0f, 1.0f,
+        x1, y2, 0.0f, 0.0f, 1.0f
+    };
+
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float), quad);
+    glEnableVertexAttribArray(0);
+    GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
+    glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5*sizeof(float), quad+3);
+    glEnableVertexAttribArray(texCoordLoc);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+
 int main() {
     SDL_Init(SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG);
+    TTF_Init();
+    TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16);
+    if (!font) {
+        cerr << "Erreur chargement police: " << TTF_GetError() << endl;
+        return 1;
+    }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_Window* window = SDL_CreateWindow("Pilonix Viewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_OPENGL);
@@ -118,6 +193,8 @@ int main() {
 
     vector<Objx> Objxs;
     map<string, GLuint> textureIDs;
+    GLuint textTex = 0;
+    int textW = 0, textH = 0;
 
     for (const auto& entry : fs::directory_iterator("assets")) {
         if (entry.path().extension() == ".plxl") {
@@ -177,6 +254,9 @@ int main() {
         float screenY = -((mouseY - HEIGHT / 2.0f) / (HEIGHT / 2.0f)  - offsetY) / scale;
         Vec3 base = unitX * screenX + unitY * screenY;
 
+        int triangleCount = 0;
+        int hoveredTriangle = -1;
+        float closestT = 1e9f;
         for (auto& p : Objxs) {
             for (auto& s : p.getSurfaces()) {
                 string tex = fs::path(s.texture).filename().string();
@@ -191,12 +271,25 @@ int main() {
                         tri[j*5+3] = pts[i+j].u;
                         tri[j*5+4] = pts[i+j].v;
                     }
+                    Vec3 v0 = rotation * Vec3(pts[i].x, pts[i].y, pts[i].z);
+                    Vec3 v1 = rotation * Vec3(pts[i+1].x, pts[i+1].y, pts[i+1].z);
+                    Vec3 v2 = rotation * Vec3(pts[i+2].x, pts[i+2].y, pts[i+2].z);
+                    float tHit;
+                    if (rayIntersectsTriangle(base, unitZ, v0, v1, v2, tHit)) {
+                        if (tHit < closestT) {
+                            closestT = tHit;
+                            hoveredTriangle = triangleCount;
+                        }
+                    }
+
                     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri);
                     glEnableVertexAttribArray(0);
                     GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
                     glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
                     glEnableVertexAttribArray(texCoordLoc);
                     glDrawArrays(GL_TRIANGLES, 0, 3);
+
+                    ++triangleCount;
                 }
             }
         }
@@ -216,12 +309,26 @@ int main() {
         glLineWidth(4.0f);
         glDrawArrays(GL_LINES, 0, 2);
 
+        string info = "Triangles: " + to_string(triangleCount);
+        if (hoveredTriangle >= 0)
+            info += "  Hit: " + to_string(hoveredTriangle);
+        createTextTexture(font, info, textTex, textW, textH);
+
+        glUniform1f(scaleLoc, 1.0f);
+        glUniform1f(offsetXLoc, 0.0f);
+        glUniform1f(offsetYLoc, 0.0f);
+        Mat3 id = Mat3::identity();
+        glUniformMatrix3fv(rotLoc, 1, GL_FALSE, id.data());
+        drawText(program, textTex, textW, textH, 10, 10);
+
         SDL_GL_SwapWindow(window);
     }
 
     SDL_GL_DeleteContext(context);
     SDL_DestroyWindow(window);
     IMG_Quit();
+    TTF_CloseFont(font);
+    TTF_Quit();
     SDL_Quit();
     return 0;
 }

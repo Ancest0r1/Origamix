@@ -52,6 +52,39 @@ const char* fragmentShaderSrc = R"(
     }
 )";
 
+const char* axisVertexShaderSrc = R"(
+    #version 100
+    attribute vec4 vPosition;
+    uniform float angleX;
+    uniform float angleY;
+    uniform float offsetX;
+    uniform float offsetY;
+    uniform float scale;
+    void main() {
+        float cosX = cos(angleX);
+        float sinX = sin(angleX);
+        float cosY = cos(angleY);
+        float sinY = sin(angleY);
+        vec4 pos = vPosition;
+
+        float y = pos.y * cosX - pos.z * sinX;
+        float z = pos.y * sinX + pos.z * cosX;
+        float x = pos.x * cosY + z * sinY;
+        z = -pos.x * sinY + z * cosY;
+
+        gl_Position = vec4(x*scale + offsetX, y*scale + offsetY, z*scale, z + 2.0);
+    }
+)";
+
+const char* axisFragmentShaderSrc = R"(
+    #version 100
+    precision mediump float;
+    uniform vec4 color;
+    void main() {
+        gl_FragColor = color;
+    }
+)";
+
 GLuint compileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
@@ -80,6 +113,24 @@ GLuint createProgram() {
         char log[512];
         glGetProgramInfoLog(program, 512, nullptr, log);
         cerr << "[Program Link Error] " << log << endl;
+    }
+    return program;
+}
+
+GLuint createAxisProgram() {
+    GLuint vs = compileShader(GL_VERTEX_SHADER, axisVertexShaderSrc);
+    GLuint fs = compileShader(GL_FRAGMENT_SHADER, axisFragmentShaderSrc);
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glBindAttribLocation(program, 0, "vPosition");
+    glLinkProgram(program);
+    GLint success;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetProgramInfoLog(program, 512, nullptr, log);
+        cerr << "[Axis Program Link Error] " << log << endl;
     }
     return program;
 }
@@ -117,6 +168,7 @@ int main() {
     SDL_GLContext context = SDL_GL_CreateContext(window);
 
     GLuint program = createProgram();
+    GLuint axisProgram = createAxisProgram();
     glUseProgram(program);
     GLint texLoc = glGetUniformLocation(program, "tex");
     glUniform1i(texLoc, 0);
@@ -125,6 +177,13 @@ int main() {
     GLint scaleLoc  = glGetUniformLocation(program, "scale");
     GLint offsetXLoc = glGetUniformLocation(program, "offsetX");
     GLint offsetYLoc = glGetUniformLocation(program, "offsetY");
+
+    GLint axisAngleXLoc = glGetUniformLocation(axisProgram, "angleX");
+    GLint axisAngleYLoc = glGetUniformLocation(axisProgram, "angleY");
+    GLint axisScaleLoc  = glGetUniformLocation(axisProgram, "scale");
+    GLint axisOffsetXLoc = glGetUniformLocation(axisProgram, "offsetX");
+    GLint axisOffsetYLoc = glGetUniformLocation(axisProgram, "offsetY");
+    GLint axisColorLoc   = glGetUniformLocation(axisProgram, "color");
 
     float angleX = 0, angleY = 0, scale = 1.0f;
     float offsetX = 0, offsetY = 0;
@@ -211,13 +270,40 @@ int main() {
                     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri);
                     glEnableVertexAttribArray(0);
                     GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
-                    glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
+                glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
                     glEnableVertexAttribArray(texCoordLoc);
 
                     glDrawArrays(GL_TRIANGLES, 0, 3);
                 }
             }
         }
+
+        // Draw rotated basis axes in bottom-left corner
+        glUseProgram(axisProgram);
+        glUniform1f(axisAngleXLoc, angleX);
+        glUniform1f(axisAngleYLoc, angleY);
+        glUniform1f(axisScaleLoc, 0.2f);
+        glUniform1f(axisOffsetXLoc, -1.8f);
+        glUniform1f(axisOffsetYLoc, -1.8f);
+
+        float axisX[] = {0.f,0.f,0.f,0.f,0.f, 1.f,0.f,0.f,0.f,0.f};
+        float axisY[] = {0.f,0.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f,0.f};
+        float axisZ[] = {0.f,0.f,0.f,0.f,0.f, 0.f,0.f,1.f,0.f,0.f};
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisX);
+        glEnableVertexAttribArray(0);
+        glUniform4f(axisColorLoc, 1.f, 0.f, 0.f, 1.f);
+        glDrawArrays(GL_LINES, 0, 2);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisY);
+        glUniform4f(axisColorLoc, 0.f, 1.f, 0.f, 1.f);
+        glDrawArrays(GL_LINES, 0, 2);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisZ);
+        glUniform4f(axisColorLoc, 0.f, 0.f, 1.f, 1.f);
+        glDrawArrays(GL_LINES, 0, 2);
+
+        glUseProgram(program);
 
         SDL_GL_SwapWindow(window);
     }

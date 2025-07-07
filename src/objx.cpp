@@ -142,10 +142,15 @@ bool Objx::save() {
     // 🔁 Écriture du fichier .mesh
     string meshPath = tempFolder + "map.mesh";
     ofstream out(meshPath);
+    string p1;
+    ostringstream oss;
     for (const auto& s : surfaces) {
         out << "texture=" << fs::path(s.texture).filename().string() << "\n";
         for (const auto& p : s.points) {
-            out << "v " << p.x << " " << p.y << " " << p.z << " " << p.u << " " << p.v << "\n";
+            oss << "v " << p.x << " " << p.y << " " << p.z << " " << p.u << " " << p.v << "\n";
+            p1 = oss.str();
+            out << p1;
+            cout << p1;
         }
         out << "\n";
     }
@@ -175,42 +180,13 @@ bool Objx::save() {
 }
 
 string Objx::toString() {
-    if (emplacement.empty()) {
-        cerr << "[inspecter] Aucun emplacement défini." << endl;
-        return "";
-    }
-
-    int err = 0;
-    zip_t* archive = zip_open(emplacement.c_str(), 0, &err);
-    if (!archive) {
-        cerr << "[inspecter] Erreur ouverture archive: code=" << err << endl;
-        return "";
-    }
-
-    zip_int64_t num_files = zip_get_num_entries(archive, 0);
-    for (int i = 0; i < num_files; ++i) {
-        const char* name = zip_get_name(archive, i, 0);
-        if (!name) continue;
-
-        string filename = name;
-        if (filename.size() < 5 || filename.substr(-5) == ".mesh") continue;
-
-        zip_file_t* zf = zip_fopen_index(archive, i, 0);
-        if (!zf) continue;
-
-        stringstream ss;
-        char buffer[4096];
-        zip_int64_t bytesRead;
-        while ((bytesRead = zip_fread(zf, buffer, sizeof(buffer))) > 0) {
-            ss.write(buffer, bytesRead);
+    stringstream ss;
+    for (const auto& s : surfaces) {
+        ss << "texture=" << fs::path(s.texture).filename().string() << "\n";
+        for (const auto& p : s.points) {
+            ss << "v " << p.x << " " << p.y << " " << p.z << " " << p.u << " " << p.v << "\n";
         }
-        zip_fclose(zf);
-        zip_close(archive);
-
-        return ss.str(); // 🟢 Retourne immédiatement dès que le .mesh est trouvé
+        ss << "\n";
     }
-
-    zip_close(archive);
-    cerr << "[inspecter] Aucun fichier .mesh trouvé." << endl;
-    return "";
+    return ss.str();
 }

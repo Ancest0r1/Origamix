@@ -38,9 +38,14 @@ const char* fragmentShaderSrc = R"(
     #version 100
     precision mediump float;
     uniform sampler2D tex;
+    uniform int useColor;
+    uniform vec4 color;
     varying vec2 vTexCoord;
     void main() {
-        gl_FragColor = texture2D(tex, vTexCoord);
+        if (useColor == 1)
+            gl_FragColor = color;
+        else
+            gl_FragColor = texture2D(tex, vTexCoord);
     }
 )";
 
@@ -75,6 +80,7 @@ GLuint createProgram() {
     }
     return program;
 }
+
 
 GLuint loadTexture(const string& filename) {
     SDL_Surface* surface = IMG_Load(filename.c_str());
@@ -186,7 +192,14 @@ int main() {
     GLint scaleLoc  = glGetUniformLocation(program, "scale");
     GLint offsetXLoc = glGetUniformLocation(program, "offsetX");
     GLint offsetYLoc = glGetUniformLocation(program, "offsetY");
+    GLint useColorLoc = glGetUniformLocation(program, "useColor");
+    GLint colorLoc    = glGetUniformLocation(program, "color");
     GLint rotLoc = glGetUniformLocation(program, "rotationMatrix");
+
+    // default to textured rendering
+    glUniform1i(useColorLoc, 0);
+    glUniform4f(colorLoc, 1.0f, 1.0f, 1.0f, 1.0f);
+
 
     float angleX = 0, angleY = 0, scale = 1.0f;
     float offsetX = 0, offsetY = 0;
@@ -285,7 +298,7 @@ int main() {
                     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri);
                     glEnableVertexAttribArray(0);
                     GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
-                    glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
+                glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), tri + 3);
                     glEnableVertexAttribArray(texCoordLoc);
                     glDrawArrays(GL_TRIANGLES, 0, 3);
 
@@ -320,6 +333,43 @@ int main() {
         Mat3 id = Mat3::identity();
         glUniformMatrix3fv(rotLoc, 1, GL_FALSE, id.data());
         drawText(program, textTex, textW, textH, 10, 10);
+
+        // Draw rotated basis axes in bottom-left corner
+        glUniform1i(useColorLoc, 1);
+        glUniform1f(angleXLoc, angleX);
+        glUniform1f(angleYLoc, angleY);
+        glUniform1f(scaleLoc, 0.2f);
+        glUniform1f(offsetXLoc, -1.8f);
+        glUniform1f(offsetYLoc, -1.8f);
+
+        float axisX[] = {0.f,0.f,0.f,0.f,0.f, 1.f,0.f,0.f,0.f,0.f};
+        float axisY[] = {0.f,0.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f,0.f};
+        float axisZ[] = {0.f,0.f,0.f,0.f,0.f, 0.f,0.f,1.f,0.f,0.f};
+
+        GLint texCoordLoc = glGetAttribLocation(program, "aTexCoord");
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisX);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisX + 3);
+        glEnableVertexAttribArray(texCoordLoc);
+        glUniform4f(colorLoc, 1.f, 0.f, 0.f, 1.f);
+        glDrawArrays(GL_LINES, 0, 2);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisY);
+        glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisY + 3);
+        glUniform4f(colorLoc, 0.f, 1.f, 0.f, 1.f);
+        glDrawArrays(GL_LINES, 0, 2);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisZ);
+        glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), axisZ + 3);
+        glUniform4f(colorLoc, 0.f, 0.f, 1.f, 1.f);
+        glDrawArrays(GL_LINES, 0, 2);
+
+        // restore textured rendering state
+        glUniform1i(useColorLoc, 0);
+        glUniform1f(scaleLoc, scale);
+        glUniform1f(offsetXLoc, offsetX);
+        glUniform1f(offsetYLoc, offsetY);
 
         SDL_GL_SwapWindow(window);
     }
